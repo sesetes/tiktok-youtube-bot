@@ -1,0 +1,64 @@
+import os
+from yt_dlp import YoutubeDL
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
+
+# ضيف المسار الكامل لمجلد ffmpeg
+os.environ["PATH"] += os.pathsep + r"C:\Users\Administrator\Downloads\ffmpeg-7.1.1-essentials_build\bin"
+
+BOT_TOKEN = "7681866267:AAFfr4PZrOuFM5PkKKNLrMZ-sCfw2df7cf8"
+
+ydl_opts_base = {'outtmpl': 'downloads/%(title)s.%(ext)s','quiet': True}
+ydl_opts_mp3 = {
+    **ydl_opts_base,
+    'format': 'bestaudio/best',
+    'postprocessors': [{'key': 'FFmpegExtractAudio','preferredcodec': 'mp3','preferredquality': '192'}],
+}
+ydl_opts_video = {
+    **ydl_opts_base,
+    'format': 'bestvideo+bestaudio/best',
+    'merge_output_format': 'mp4',
+}
+
+def download_video(url, audio_only=False):
+    opts = ydl_opts_mp3 if audio_only else ydl_opts_video
+    with YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=True)
+        filename = ydl.prepare_filename(info)
+        if audio_only:
+            filename = filename.rsplit('.', 1)[0] + '.mp3'
+        return filename
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    url = update.message.text
+    buttons = [
+        [InlineKeyboardButton("🎵 تحميل MP3", callback_data=f"mp3|{url}")],
+        [InlineKeyboardButton("📹 تحميل فيديو", callback_data=f"video|{url}")],
+    ]
+    await update.message.reply_text("اختار الصيغة:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    choice, url = query.data.split('|')
+    audio_only = (choice == "mp3")
+    await query.edit_message_text("🔄 جارِ التحميل والمعالجة...")
+    try:
+        file_path = download_video(url, audio_only)
+        await context.bot.send_document(chat_id=update.effective_chat.id, document=open(file_path, 'rb'))
+        os.remove(file_path)
+    except Exception as e:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=f"❌ خطأ: {e}")
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("أرسل رابط فيديو من YouTube أو TikTok أو Instagram لاختياره.")
+
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()
